@@ -2,6 +2,8 @@
 
 桌面端 AI Office 工具:VSCode 风格文件树 + Office 文件所见即所得预览 + AI 修改。
 
+![界面效果图](img/display.png)
+
 ## 特性
 
 - **VSCode 风格文件树**:左侧递归文件树(懒加载),Office 文件(xlsx/docx/pptx)图标区分,支持新建文件/文件夹
@@ -9,7 +11,7 @@
 - **AI 修改 Office 文件**:聊天面板 SSE 流式输出(思考过程 → 工具调用 → 结果),选中文件自动注入上下文,AI 修改后预览实时刷新
 - **模型自由选择**:内置多 provider 模型目录(DeepSeek / OpenAI / Anthropic / Google / Groq 等),在界面中直接选择模型并填写 API Key,**Key 不写入 .env**
 - **安全边界**:AI 只能修改「当前选中文件」的内容,禁止新建 / 删除文件、禁止修改其他文件
-- **跨平台桌面**:Tauri 2 打包 macOS(Intel + Apple Silicon universal 包)与 Windows(NSIS / MSI)
+- **跨平台桌面**:Tauri 2 打包 macOS(Intel + Apple Silicon universal 包)、Windows(NSIS / MSI)与 Linux(deb / AppImage)
 
 ## 技术栈
 
@@ -139,7 +141,7 @@ web/          # 前端(React + Vite + Tailwind)
   src/api/         # REST + SSE 客户端
 src-tauri/    # Tauri 2 桌面壳(Rust + capabilities/permissions)
 scripts/      # 资源打包脚本(stage-resources)
-.github/workflows/  # CI:macOS universal / Windows 打包(打 tag v* 触发)
+.github/workflows/  # ci.yml(推分支/PR 校验)+ build.yml(macOS/Windows/Linux 打包,打 tag v* 发布 Release)
 ```
 
 ## 构建与打包
@@ -148,15 +150,59 @@ scripts/      # 资源打包脚本(stage-resources)
 yarn build          # 构建前端(dist-web)+ 后端(dist)
 yarn serve          # 生产模式:Node 后端直接 serve dist-web(浏览器访问 http://localhost:3001)
 yarn stage:resources  # 把 dist / dist-web / 生产依赖 / node 运行时 staging 到 src-tauri/resources
-yarn tauri:build    # 桌面安装包(macOS .app/.dmg、Windows NSIS/MSI)
+yarn tauri:build    # 桌面安装包(macOS .app/.dmg、Windows NSIS/MSI、Linux deb/AppImage)
 ```
 
 `yarn stage:resources` 会在系统临时目录用 `yarn install --production` 装出扁平的运行时依赖(避开 workspaces),校验 `officecli` 二进制后拷入 `src-tauri/resources/node_modules`;`tauri build` 通过 `beforeBuildCommand: yarn build && yarn stage:resources` 自动串联。
 
-CI(`.github/workflows/build.yml`)在推送 `v*` tag 时自动构建(`yarn install --frozen-lockfile`):
+## CI / GitHub Actions
 
-- macOS:universal 包(Intel + Apple Silicon)→ `.dmg` + `.app`
-- Windows:x64 → NSIS `.exe` + MSI `.msi`
+| 工作流                          | 触发                       | 作用                                                        |
+| ------------------------------- | -------------------------- | ----------------------------------------------------------- |
+| `.github/workflows/ci.yml`      | 推 `master` / PR 到 master | 依赖安装 + `yarn build`(前后端),防止坏代码流入打包流程     |
+| `.github/workflows/build.yml`   | 推送 `v*` tag / 手动触发   | 三端并行打包 + 上传 Artifacts;tag 触发时自动发布 Release     |
+
+`build.yml` 矩阵(每个平台独立 job,失败互不影响):
+
+| 平台                | Runner         | 产物                                       |
+| ------------------- | -------------- | ------------------------------------------ |
+| macOS universal     | `macos-latest` | `.dmg` + `.app`(压成 zip)                 |
+| Windows x64         | `windows-latest` | NSIS `.exe` + MSI `.msi`                 |
+| Linux x64           | `ubuntu-22.04` | `.deb` + `.AppImage`(需 rpm 时见 workflow 注释) |
+
+要点:
+
+- 依赖与缓存:Node 20 + Yarn 1.22.22(Classic),`cache: yarn`;Rust 用 `Swatinem/rust-cache` 缓存 `src-tauri/target`,二次构建显著加速
+- 版本同步:tag 触发时自动把 `v*` 版本写入 `tauri.conf.json`、`package.json`、`web/package.json`,包名与 tag 一致
+- macOS 产物处理:`.app` 是目录,先用 `ditto -c -k --keepParent` 压成 zip 才能作为 Release 附件
+- 手动触发(Actions → Build Desktop Packages → Run workflow)只产出 Artifacts,不发布 Release
+
+### macOS 签名与公证(可选)
+
+未配置 secrets 时产出未签名包(首次打开需右键 → 打开)。配置以下仓库 secrets 后工作流自动签名,
+三者齐全时 Tauri 自动完成公证:
+
+| Secret                      | 说明                                                   |
+| --------------------------- | ------------------------------------------------------ |
+| `APPLE_CERTIFICATE`         | base64 编码的 `.p12` 证书(生成:`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | 证书密码                                               |
+| `APPLE_SIGNING_IDENTITY`    | 如 `Developer ID Application: XXX (TEAMID)`            |
+| `APPLE_ID`                  | Apple ID(公证用)                                      |
+| `APPLE_PASSWORD`            | App 专用密码(公证用)                                  |
+| `APPLE_TEAM_ID`             | Team ID(公证用)                                       |
+
+### 发版流程
+
+```bash
+# 版本号无需手动改:工作流会把 tag 的 v* 同步到 tauri.conf.json / package.json / web/package.json
+git add -A && git commit -m "release: v0.1.0"
+git tag v0.1.0
+git push origin master --tags      # 推送 tag 即触发三端打包
+```
+
+tag 推送后工作流自动:构建三端安装包 → 创建以 tag 命名的 GitHub Release → 上传全部附件;
+tag 形如 `v0.1.0-beta.1`(含 `-`)时自动标记为预发布。`ci.yml` 会在推分支 / PR 时先跑
+`yarn build`,避免坏代码浪费一次完整打包。
 
 ## 可靠性设计
 

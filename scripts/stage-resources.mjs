@@ -42,14 +42,23 @@ try {
     ),
   );
 
-  // 4. 离线优先安装(yarn 全局缓存命中时无需联网;
-  //    officecli 的 postinstall 负责下载 vendor 二进制,yarn 默认执行构建脚本)
-  const install = runYarn(['install', '--production', '--prefer-offline', '--no-lockfile', '--non-interactive'], {
-    stdio: 'inherit',
-    cwd: stageDir,
-  });
-  if (install.status !== 0) {
-    throw new Error(`yarn install 失败(exit=${install.status}),请确认网络或 yarn 缓存中存在生产依赖`);
+  // 4. 安装生产依赖(officecli 的 postinstall 负责下载 vendor 二进制,yarn 默认执行构建脚本)
+  //    两轮尝试:
+  //      ① --prefer-offline:命中 yarn 全局缓存时无需联网,CI 上更快;
+  //      ② 纯联网安装:缓存条目损坏(如缺 package.json 的不完整缓存目录)会让 ① 直接失败,
+  //         去掉 --prefer-offline 由 yarn 重新拉取即可绕过,避免本地/CI 打包被脏缓存卡死。
+  const attempts = [
+    ['install', '--production', '--prefer-offline', '--no-lockfile', '--non-interactive'],
+    ['install', '--production', '--no-lockfile', '--non-interactive', '--network-timeout', '600000'],
+  ];
+  let install = null;
+  for (const [i, args] of attempts.entries()) {
+    console.log(`[stage:resources] 安装生产依赖(${i === 0 ? '离线优先' : '联网重试'}): yarn ${args.join(' ')}`);
+    install = runYarn(args, { stdio: 'inherit', cwd: stageDir });
+    if (install.status === 0) break;
+  }
+  if (!install || install.status !== 0) {
+    throw new Error(`yarn install 失败(exit=${install?.status}),请确认网络可用或 yarn 缓存中存在生产依赖`);
   }
 
   // 5. 校验关键产物后拷入资源目录

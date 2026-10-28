@@ -1,0 +1,44 @@
+name: CI
+
+# 轻量校验:推分支 / PR 时验证依赖安装与前端 + 后端构建,
+# 避免坏代码流入 tag 构建(打包链路很长,失败一次成本高)。
+on:
+  push:
+    branches: ['master']
+  pull_request:
+    branches: ['master']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build web + server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Ensure Yarn 1 (Classic)
+        run: |
+          if ! command -v yarn >/dev/null 2>&1; then
+            npm install -g yarn@1.22.22
+          fi
+          yarn --version
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # build:web = tsc --noEmit && vite build;build:server = tsc -p tsconfig.node.json
+      - name: Build
+        run: yarn build
