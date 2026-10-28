@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"AI Office desktop capabilities","remote":{"urls":["http://127.0.0.1:*","http://localhost:*"]},"local":true,"windows":["main"],"permissions":["core:default","dialog:default","allow-pick-workspace-dir"]}}

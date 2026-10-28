@@ -1,0 +1,58 @@
+name: Build Desktop Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS:universal 包(Intel + Apple Silicon)
+          - platform: macos-latest
+            tauri_args: --target universal-apple-darwin
+            bundle_paths: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
+          # Windows:x64(NSIS 安装包 + MSI)
+          - platform: windows-latest
+            tauri_args: ''
+            bundle_paths: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/bundle/msi/*.msi
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS universal targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # beforeBuildCommand 已包含 yarn build && yarn stage:resources
+      - name: Build Tauri app
+        run: yarn tauri build ${{ matrix.tauri_args }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-office-${{ matrix.platform }}
+          path: ${{ matrix.bundle_paths }}
+          if-no-files-found: error

@@ -1,0 +1,21 @@
+[package]
+name = "ai-office"
+version = "0.1.0"
+description = "AI Office 桌面端(Tauri 外壳 + Node 后端 + OfficeCLI)"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

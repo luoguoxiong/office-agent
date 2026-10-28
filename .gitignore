@@ -1,72 +1,44 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# 依赖
+node_modules/
+.yarn/
+yarn-error.log
+yarn-debug.log*
+
+# 构建产物
+dist/
+dist-web/
+
+# 环境变量
+.env
+
+# 系统文件
 .DS_Store
-.atom/
-.buildlog/
-.history
-.svn/
+*.log
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
+# Tauri
+src-tauri/target/
+src-tauri/resources/
+src-tauri/Cargo.lock
+
+# 编辑器
+.vscode/
 .idea/
+# AI 编码工具的任务日志(本地工作记录)
+.codeagent/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-.dart_tool/
-.flutter-plugins
-.packages
-.pub-cache/
-.pub/
-/build/
-
-# Android related
-**/android/**/gradle-wrapper.jar
-**/android/.gradle
-**/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
-**/android/local.properties
-**/android/**/GeneratedPluginRegistrant.java
-
-# iOS/XCode related
-**/ios/**/*.mode1v3
-**/ios/**/*.mode2v3
-**/ios/**/*.moved-aside
-**/ios/**/*.pbxuser
-**/ios/**/*.perspectivev3
-**/ios/**/*sync/
-**/ios/**/.sconsign.dblite
-**/ios/**/.tags*
-**/ios/**/.vagrant/
-**/ios/**/DerivedData/
-**/ios/**/Icon?
-**/ios/**/Pods/
-**/ios/**/.symlinks/
-**/ios/**/profile
-**/ios/**/xcuserdata
-**/ios/.generated/
-**/ios/Flutter/App.framework
-**/ios/Flutter/Flutter.framework
-**/ios/Flutter/Generated.xcconfig
-**/ios/Flutter/app.flx
-**/ios/Flutter/app.zip
-**/ios/Flutter/flutter_assets/
-**/ios/ServiceDefinitions.json
-**/ios/Runner/GeneratedPluginRegistrant.*
-
-# Exceptions to above rules.
-!**/ios/**/default.mode1v3
-!**/ios/**/default.mode2v3
-!**/ios/**/default.pbxuser
-!**/ios/**/default.perspectivev3
-!/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+# ===== 用户私有数据(绝不提交) =====
+# 后端运行期:工作区 session(JSON 里有完整对话历史) / mutex 锁 / 预览端口映射 / workspace 选择持久化
+.aipack/
+# 后端默认工作区(用户实际的 Office 文档 .xlsx/.docx/.pptx)
+office-workspace/
+# Tauri 桌面端的 WebView localStorage(含模型 API Key 明文)
+web/src-tauri/**/data/
+web/localStorage*.json
+# 任何位置的 Office 文档成品,避免泄露用户实际报表/PPT 内容
+# (如果要提交示例文档,建议放在 samples/ 目录并显式添加 -f)
+*.xlsx
+*.docx
+*.pptx
+!samples/
+!web/public/samples/
+!src/**/samples/
