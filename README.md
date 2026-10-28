@@ -184,7 +184,7 @@ yarn tauri:build    # 桌面安装包(macOS .app/.dmg、Windows NSIS/MSI、Linux
 
 | Secret                      | 说明                                                   |
 | --------------------------- | ------------------------------------------------------ |
-| `APPLE_CERTIFICATE`         | base64 编码的 `.p12` 证书(生成:`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE`         | base64 编码的 `.p12` 证书(生成:`base64 -i cert.p12 \| tr -d '\n' \| pbcopy`,必须压成单行) |
 | `APPLE_CERTIFICATE_PASSWORD` | 证书密码                                               |
 | `APPLE_SIGNING_IDENTITY`    | 如 `Developer ID Application: XXX (TEAMID)`            |
 | `APPLE_ID`                  | Apple ID(公证用)                                      |

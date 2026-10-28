@@ -47,6 +47,8 @@ jobs:
               src-tauri/target/release/bundle/deb/*.deb
               src-tauri/target/release/bundle/appimage/*.AppImage
     runs-on: ${{ matrix.os }}
+    # Rust 首次编译(尤其 macOS universal 双架构)可能很慢,给足上限,避免被 6h 默认超时中断后毫无产物
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,14 +130,23 @@ jobs:
             echo "未配置 APPLE_CERTIFICATE → 产出未签名包(首次打开需右键 → 打开)"
             exit 0
           fi
-          {
-            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
-            [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
-            [ -n "$APPLE_SIGNING_IDENTITY" ] && echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
-            [ -n "$APPLE_ID" ] && echo "APPLE_ID=$APPLE_ID"
-            [ -n "$APPLE_PASSWORD" ] && echo "APPLE_PASSWORD=$APPLE_PASSWORD"
-            [ -n "$APPLE_TEAM_ID" ] && echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
-          } >> "$GITHUB_ENV"
+          emit() {
+            # 只有非空才写入 GITHUB_ENV:tauri 拿到空值会解码失败并破坏构建
+            if [ -n "${2:-}" ]; then
+              # macOS base64 默认按 76 字符折行,写入 GITHUB_ENV 前必须压成单行,否则多行值会破坏 env 文件
+              local v
+              v=$(printf '%s' "$2" | tr -d '\n\r')
+              echo "$1=$v" >> "$GITHUB_ENV"
+            else
+              echo "  · $1 未配置 → 跳过"
+            fi
+          }
+          emit APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+          emit APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+          emit APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+          emit APPLE_ID "$APPLE_ID"
+          emit APPLE_PASSWORD "$APPLE_PASSWORD"
+          emit APPLE_TEAM_ID "$APPLE_TEAM_ID"
           echo "Apple 签名已配置(APPLE_ID 齐全时 tauri 自动公证)"
 
       # beforeBuildCommand 已串联 yarn build && yarn stage:resources
