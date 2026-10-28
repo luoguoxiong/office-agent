@@ -1,0 +1,211 @@
+name: Build Desktop Packages
+
+# 触发方式:
+#   1) 推送 v* tag → 构建三端安装包 + 自动创建 GitHub Release 并上传
+#   2) 手动 workflow_dispatch → 只构建并上传 Actions Artifacts(不发布 Release)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS:universal 包(Intel + Apple Silicon 双架构)
+          - name: 'macOS (universal)'
+            os: macos-latest
+            tauri_args: --target universal-apple-darwin
+            bundle_dir: src-tauri/target/universal-apple-darwin/release/bundle
+            assets: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.zip
+          # Windows:x64(NSIS 安装包 + MSI)
+          - name: Windows (x64)
+            os: windows-latest
+            tauri_args: ''
+            bundle_dir: src-tauri/target/release/bundle
+            assets: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/bundle/msi/*.msi
+          # Linux:x64(deb + AppImage;如还需 rpm,在此追加 release/bundle/rpm/*.rpm)
+          - name: Linux (x64)
+            os: ubuntu-22.04
+            tauri_args: ''
+            bundle_dir: src-tauri/target/release/bundle
+            assets: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
+    runs-on: ${{ matrix.os }}
+    # Rust 首次编译(尤其 macOS universal 双架构)可能很慢,给足上限,避免被 6h 默认超时中断后毫无产物
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Ensure Yarn 1 (Classic)
+        shell: bash
+        run: |
+          # 本项目按 Yarn Classic 编写(workspaces),部分 runner 镜像未预装 / 预装的是 Yarn 2+
+          if ! command -v yarn >/dev/null 2>&1; then
+            npm install -g yarn@1.22.22
+          fi
+          yarn --version
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS universal targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # 让安装包 / 文件名与 tag 版本一致(tauri.conf.json + 根 package.json + web/package.json)
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e '
+            const fs = require("fs");
+            const version = process.argv[1];
+            const files = ["src-tauri/tauri.conf.json", "package.json", "web/package.json"];
+            for (const file of files) {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = version;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            }
+            console.log("version synced to " + version);
+          ' "$VERSION"
+
+      # macOS 签名 / 公证(可选):仅当配置了 APPLE_CERTIFICATE 才把相关变量注入环境。
+      # 未配置时这些变量完全不设置(而非空字符串),tauri 直接产出未签名包 ——
+      # 空值会让 tauri 拿到空证书并解码失败,反而破坏构建。
+      - name: Setup macOS signing (optional)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "未配置 APPLE_CERTIFICATE → 产出未签名包(首次打开需右键 → 打开)"
+            exit 0
+          fi
+          emit() {
+            # 只有非空才写入 GITHUB_ENV:tauri 拿到空值会解码失败并破坏构建
+            if [ -n "${2:-}" ]; then
+              # macOS base64 默认按 76 字符折行,写入 GITHUB_ENV 前必须压成单行,否则多行值会破坏 env 文件
+              local v
+              v=$(printf '%s' "$2" | tr -d '\n\r')
+              echo "$1=$v" >> "$GITHUB_ENV"
+            else
+              echo "  · $1 未配置 → 跳过"
+            fi
+          }
+          emit APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+          emit APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+          emit APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+          emit APPLE_ID "$APPLE_ID"
+          emit APPLE_PASSWORD "$APPLE_PASSWORD"
+          emit APPLE_TEAM_ID "$APPLE_TEAM_ID"
+          echo "Apple 签名已配置(APPLE_ID 齐全时 tauri 自动公证)"
+
+      # beforeBuildCommand 已串联 yarn build && yarn stage:resources
+      - name: Build Tauri app
+        run: yarn tauri build ${{ matrix.tauri_args }}
+
+      # .app 是目录,必须先压成 zip 才能作为 Release 附件上传
+      # (ditto --keepParent 保留 .app 目录本身与扩展属性)
+      - name: Zip macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          APP=$(find "${{ matrix.bundle_dir }}/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "::error::未找到 .app 产物"
+            exit 1
+          fi
+          ditto -c -k --keepParent "$APP" "${APP}.zip"
+          rm -rf "$APP"
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-office-${{ matrix.os }}
+          path: ${{ matrix.assets }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    if: needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -lhR artifacts
+
+      - name: Create Release and upload bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: AI Office ${{ github.ref_name }}
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+          draft: false
+          # tag 形如 v0.1.0-beta.1 → 自动标记为预发布
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
